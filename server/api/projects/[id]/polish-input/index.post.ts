@@ -9,7 +9,7 @@ export default defineEventHandler(async (event) => {
   const projectId = getRouterParam(event, 'id') || ''
   requireProjectForUser(projectId, user.id)
 
-  const body = await readBody<{ rawInput?: string }>(event).catch(() => ({}))
+  const body = await readBody<{ rawInput?: string }>(event).catch((): { rawInput?: string } => ({}))
   const rawInput = (body.rawInput || '').trim()
 
   if (!rawInput) {

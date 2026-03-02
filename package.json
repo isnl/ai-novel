@@ -11,8 +11,11 @@
     "prepare": "nuxt prepare"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.50",
+    "@ai-sdk/openai-compatible": "^2.0.31",
     "@pinia/nuxt": "^0.11.3",
     "@unocss/nuxt": "^66.6.2",
+    "ai": "^6.0.105",
     "better-sqlite3": "^12.6.2",
     "diff": "^8.0.3",
     "nuxt": "^4.3.1",

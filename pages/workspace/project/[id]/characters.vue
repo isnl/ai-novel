@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { definePageMeta, useRoute } from '#imports'
-import { apiFetch } from '~/composables/useApi'
+import { apiFetch, apiStreamFetch } from '~/composables/useApi'
 import WorkspaceTabs from '~/components/WorkspaceTabs.vue'
 
 definePageMeta({ middleware: 'auth' })
@@ -36,6 +36,9 @@ const charForm = reactive<CharacterCard>({
 const promptTemplates = ref<Array<{ id: string; name: string; description: string }>>([])
 const selectedTemplateId = ref('')
 const userInput = ref('')
+
+// AI 原始流式输出（用于展示生成进度）
+const streamingRaw = ref('')
 
 const charCount = computed((): number => characters.value.length)
 
@@ -121,19 +124,24 @@ function deleteCharacter(index: number): void {
 // --- Actions ---
 async function generateCharacters(): Promise<void> {
   loading.value = true
+  streamingRaw.value = ''
   try {
     const body: Record<string, string> = {}
     if (userInput.value.trim()) body.userInput = userInput.value.trim()
     if (selectedTemplateId.value) body.promptTemplateId = selectedTemplateId.value
 
-    const res = await apiFetch<{ content: string }>(`/api/projects/${projectId}/characters/generate`, {
-      method: 'POST',
-      body
-    })
-    const generated = parseCharacters(res.content)
+    const fullText = await apiStreamFetch(
+      `/api/projects/${projectId}/characters/generate`,
+      body,
+      (chunk) => {
+        streamingRaw.value += chunk
+      }
+    )
+    const generated = parseCharacters(fullText)
     if (generated.length > 0) {
       characters.value = generated
     }
+    streamingRaw.value = ''
     await load()
   } finally {
     loading.value = false
@@ -319,6 +327,11 @@ async function saveCharacters(): Promise<void> {
         </button>
 
         <p class="ai-hint muted">AI 生成的角色将替换当前列表，请先保存再生成。</p>
+
+        <div v-if="streamingRaw" class="streaming-preview">
+          <h3 class="streaming-title">生成中...</h3>
+          <pre class="streaming-content">{{ streamingRaw }}</pre>
+        </div>
       </aside>
     </div>
   </div>
@@ -432,4 +445,8 @@ async function saveCharacters(): Promise<void> {
   .char-grid { grid-template-columns: 1fr; }
   .char-form-grid { grid-template-columns: 1fr; }
 }
+
+.streaming-preview { margin-top: var(--space-3); }
+.streaming-title { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--text-3); }
+.streaming-content { margin: 0; padding: var(--space-3); background: var(--surface-2); border: 1px solid var(--divider); border-radius: var(--radius-sm); font-size: var(--text-xs); font-family: var(--font-mono); white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
 </style>

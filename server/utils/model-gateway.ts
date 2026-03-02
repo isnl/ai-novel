@@ -1,6 +1,9 @@
 import type { H3Event } from 'h3'
 import { createError } from 'h3'
 import { useRuntimeConfig } from '#imports'
+import { streamText } from 'ai'
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
+import { createAnthropic } from '@ai-sdk/anthropic'
 import { decryptApiKey } from './crypto'
 import { getDb } from './db'
 
@@ -384,4 +387,71 @@ export async function runModelWithAgentBinding(event: H3Event, bindingAgentType:
 
   const message = lastError instanceof Error ? lastError.message : '未知错误'
   throw createError({ statusCode: 502, statusMessage: `模型调用失败：${message}` })
+}
+
+// ---------------------------------------------------------------------------
+// 流式调用（基于 Vercel AI SDK）
+// ---------------------------------------------------------------------------
+
+export interface StreamModelResult {
+  profileId: string
+  providerName: string
+  modelName: string
+  /** streamText 返回的结果，调用方可直接使用 toTextStreamResponse() */
+  streamResult: ReturnType<typeof streamText>
+}
+
+function createAiSdkModel(profile: ResolvedProfile) {
+  const temperature = toNumber(profile.params.temperature, 0.7)
+  const maxTokens = Math.max(128, toNumber(profile.params.max_tokens, 2048))
+
+  if (profile.providerType === 'anthropic') {
+    const baseUrl = profile.baseUrl || profile.providerBaseUrl || 'https://api.anthropic.com'
+    const provider = createAnthropic({
+      apiKey: profile.apiKey,
+      baseURL: trimTrailingSlash(baseUrl)
+    })
+    return { model: provider(profile.modelName), temperature, maxTokens }
+  }
+
+  // openai / openai_compatible
+  const baseUrl = resolveOpenAIBaseUrl(profile)
+  const provider = createOpenAICompatible({
+    name: profile.providerName,
+    apiKey: profile.apiKey,
+    baseURL: baseUrl
+  })
+  return { model: provider.chatModel(profile.modelName), temperature, maxTokens }
+}
+
+function streamWithProfile(profile: ResolvedProfile, options: RunModelOptions): StreamModelResult {
+  const { model, temperature: defaultTemp, maxTokens: defaultMaxTokens } = createAiSdkModel(profile)
+  const temperature = options.temperature ?? defaultTemp
+  const maxOutputTokens = options.maxTokens ?? defaultMaxTokens
+
+  const streamResult = streamText({
+    model,
+    system: options.systemPrompt,
+    prompt: options.userPrompt,
+    temperature,
+    maxOutputTokens
+  })
+
+  return {
+    profileId: profile.id,
+    providerName: profile.providerName,
+    modelName: profile.modelName,
+    streamResult
+  }
+}
+
+/**
+ * 流式调用模型（通过 agent binding 解析 profile）。
+ * 返回 StreamModelResult，调用方可用 streamResult.toTextStreamResponse() 返回给前端。
+ * 注意：流式模式不做自动重试 / fallback（流一旦开始无法回退）。
+ */
+export function streamModelWithAgentBinding(event: H3Event, bindingAgentType: string, options: RunModelOptions): StreamModelResult {
+  const candidates = resolveCandidateProfiles(event, bindingAgentType)
+  const profile = candidates[0]
+  return streamWithProfile(profile, options)
 }

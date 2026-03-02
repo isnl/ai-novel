@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { definePageMeta, useRoute } from '#imports'
 import { useWorkspaceStore } from '~/stores/workspace.store'
-import { apiFetch } from '~/composables/useApi'
+import { apiFetch, apiStreamFetch } from '~/composables/useApi'
 import WorkspaceTabs from '~/components/WorkspaceTabs.vue'
 import StatusBadge from '~/components/StatusBadge.vue'
 
@@ -55,9 +55,14 @@ async function generateOutline(): Promise<void> {
 async function generateDraft(): Promise<void> {
   busy.value = true
   try {
-    agentResult.value = await apiFetch(`/api/projects/${projectId.value}/chapters/${chapterId.value}/draft/generate`, {
-      method: 'POST'
-    })
+    currentContent.value = ''
+    await apiStreamFetch(
+      `/api/projects/${projectId.value}/chapters/${chapterId.value}/draft/generate`,
+      {},
+      (chunk) => {
+        currentContent.value += chunk
+      }
+    )
     await loadAll()
   } finally {
     busy.value = false

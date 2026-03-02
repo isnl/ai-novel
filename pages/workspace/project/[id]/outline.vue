@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { definePageMeta, useRoute } from '#imports'
-import { apiFetch } from '~/composables/useApi'
+import { apiFetch, apiStreamFetch } from '~/composables/useApi'
 import { useAiChat } from '~/composables/useAiChat'
 import WorkspaceTabs from '~/components/WorkspaceTabs.vue'
 
@@ -72,11 +72,10 @@ async function generateOutline(): Promise<void> {
     if (userInput.value.trim()) body.userInput = userInput.value.trim()
     if (selectedTemplateId.value) body.promptTemplateId = selectedTemplateId.value
 
-    const res = await apiFetch<{ content: string }>(`/api/projects/${projectId}/outline/generate`, {
-      method: 'POST',
-      body
+    outlineText.value = ''
+    await apiStreamFetch(`/api/projects/${projectId}/outline/generate`, body, (chunk) => {
+      outlineText.value += chunk
     })
-    outlineText.value = res.content
     await load()
   } finally {
     loading.value = false

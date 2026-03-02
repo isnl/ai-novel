@@ -2,7 +2,7 @@ import { defineEventHandler, getRouterParam } from 'h3'
 import { buildAgentSystemPrompt, buildAgentUserPrompt, failedMetadata, saveAgentRun } from '~/server/utils/agents'
 import { randomId } from '~/server/utils/crypto'
 import { getDb } from '~/server/utils/db'
-import { runModelWithAgentBinding } from '~/server/utils/model-gateway'
+import { streamModelWithAgentBinding } from '~/server/utils/model-gateway'
 import { requireChapterForProject, requireProjectForUser } from '~/server/utils/project'
 import { requireUser } from '~/server/utils/session'
 
@@ -22,7 +22,7 @@ export default defineEventHandler(async (event) => {
   const input = { type: 'chapter_draft' }
 
   try {
-    const modelResult = await runModelWithAgentBinding(event, 'generate', {
+    const { streamResult, profileId, providerName, modelName } = streamModelWithAgentBinding(event, 'generate', {
       systemPrompt: buildAgentSystemPrompt('chapter_draft'),
       userPrompt: buildAgentUserPrompt('chapter_draft', {
         projectTitle: project.title,
@@ -32,45 +32,61 @@ export default defineEventHandler(async (event) => {
       })
     })
 
-    const content = modelResult.content.trim()
+    const startedAt = Date.now()
     const draftId = randomId('draft')
-    const now = new Date().toISOString()
+    const versionNo = row.max_version + 1
 
-    db.prepare(
-      'INSERT INTO chapter_drafts (id, chapter_id, version_no, content, source, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(draftId, chapterId, row.max_version + 1, content, 'ai', now)
+    // 在流结束后保存到数据库
+    Promise.resolve(streamResult.text).then((content) => {
+      const trimmed = content.trim()
+      const now = new Date().toISOString()
 
-    db.prepare('UPDATE chapters SET active_draft_id = ?, status = ?, updated_at = ? WHERE id = ?').run(
-      draftId,
-      'reviewing',
-      now,
-      chapterId
-    )
+      db.prepare(
+        'INSERT INTO chapter_drafts (id, chapter_id, version_no, content, source, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(draftId, chapterId, versionNo, trimmed, 'ai', now)
 
-    saveAgentRun({
-      projectId,
-      chapterId,
-      agentType: 'generate',
-      input,
-      output: { content },
-      status: 'success',
-      metadata: modelResult.metadata
+      db.prepare('UPDATE chapters SET active_draft_id = ?, status = ?, updated_at = ? WHERE id = ?').run(
+        draftId,
+        'reviewing',
+        now,
+        chapterId
+      )
+
+      Promise.resolve(streamResult.usage).then((usage) => {
+        const latencyMs = Date.now() - startedAt
+        const metadata = {
+          provider: providerName,
+          model: modelName,
+          latencyMs,
+          tokensIn: usage.inputTokens ?? 0,
+          tokensOut: usage.outputTokens ?? 0,
+          costEstimate: 0
+        }
+        saveAgentRun({
+          projectId,
+          chapterId,
+          agentType: 'generate',
+          input,
+          output: { content: trimmed },
+          status: 'success',
+          metadata
+        })
+      }).catch(() => {
+        // usage 获取失败不影响主流程
+      })
+    }).catch((error: unknown) => {
+      saveAgentRun({
+        projectId,
+        chapterId,
+        agentType: 'generate',
+        input,
+        output: { error: error instanceof Error ? error.message : '模型调用失败' },
+        status: 'failed',
+        metadata: failedMetadata()
+      })
     })
 
-    return {
-      status: 'success',
-      content,
-      issues: [],
-      metadata: modelResult.metadata,
-      draft: {
-        id: draftId,
-        chapterId,
-        versionNo: row.max_version + 1,
-        content,
-        source: 'ai',
-        createdAt: now
-      }
-    }
+    return streamResult.toTextStreamResponse()
   } catch (error) {
     saveAgentRun({
       projectId,
