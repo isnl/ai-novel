@@ -1,5 +1,5 @@
-import { getRouterParam } from 'h3'
-import { buildAgentSystemPrompt, buildAgentUserPrompt, failedMetadata, saveAgentRun } from '~/server/utils/agents'
+import { defineEventHandler, getRouterParam, readBody } from 'h3'
+import { buildAgentSystemPrompt, buildAgentUserPrompt, failedMetadata, resolvePromptTemplate, saveAgentRun } from '~/server/utils/agents'
 import { getDb } from '~/server/utils/db'
 import { runModelWithAgentBinding } from '~/server/utils/model-gateway'
 import { requireProjectForUser } from '~/server/utils/project'
@@ -10,16 +10,39 @@ export default defineEventHandler(async (event) => {
   const projectId = getRouterParam(event, 'id') || ''
   const project = requireProjectForUser(projectId, user.id)
 
-  const input = { type: 'characters' }
+  const body = await readBody<{ userInput?: string; promptTemplateId?: string }>(event).catch(() => ({}))
+  const userInput = (body.userInput || '').trim()
+  const promptTemplateId = (body.promptTemplateId || '').trim()
+
+  const input = { type: 'characters', userInput, promptTemplateId }
+
+  let systemPrompt: string
+  let userPrompt: string
+
+  if (promptTemplateId) {
+    const resolved = resolvePromptTemplate(promptTemplateId, {
+      projectTitle: String(project.title),
+      userInput,
+      worldText: String(project.world_text || ''),
+      outlineText: String(project.outline_text || ''),
+      charactersJson: String(project.characters_json || '')
+    })
+    systemPrompt = resolved.systemPrompt
+    userPrompt = resolved.userPrompt
+  } else {
+    systemPrompt = buildAgentSystemPrompt('characters')
+    userPrompt = buildAgentUserPrompt('characters', {
+      projectTitle: project.title,
+      worldText: project.world_text,
+      outlineText: project.outline_text,
+      userInput
+    })
+  }
 
   try {
     const modelResult = await runModelWithAgentBinding(event, 'generate', {
-      systemPrompt: buildAgentSystemPrompt('characters'),
-      userPrompt: buildAgentUserPrompt('characters', {
-        projectTitle: project.title,
-        worldText: project.world_text,
-        outlineText: project.outline_text
-      }),
+      systemPrompt,
+      userPrompt,
       responseFormat: 'json'
     })
 

@@ -1,4 +1,4 @@
-import { readBody } from 'h3'
+import { defineEventHandler, readBody } from 'h3'
 import { getDb } from '~/server/utils/db'
 import { requireUser } from '~/server/utils/session'
 

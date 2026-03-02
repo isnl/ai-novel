@@ -1,10 +1,11 @@
-import { createError, readBody } from 'h3'
+import { createError, defineEventHandler, readBody } from 'h3'
+import { useRuntimeConfig } from '#imports'
+import { requireAdmin } from '~/server/utils/admin'
 import { encryptApiKey, randomId } from '~/server/utils/crypto'
 import { getDb } from '~/server/utils/db'
-import { requireUser } from '~/server/utils/session'
 
 export default defineEventHandler(async (event) => {
-  requireUser(event)
+  requireAdmin(event)
   const body = await readBody<{
     providerId?: string
     modelName?: string
@@ -54,7 +55,5 @@ export default defineEventHandler(async (event) => {
     db.prepare('UPDATE model_profiles SET is_default = 1 WHERE id = ?').run(profileId)
   }
 
-  return {
-    profileId
-  }
+  return { profileId }
 })

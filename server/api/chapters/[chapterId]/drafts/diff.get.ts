@@ -1,4 +1,4 @@
-import { createError, getQuery, getRouterParam } from 'h3'
+import { createError, defineEventHandler, getQuery, getRouterParam } from 'h3'
 import { getDb } from '~/server/utils/db'
 import { requireUser } from '~/server/utils/session'
 

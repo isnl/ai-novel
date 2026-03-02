@@ -1,4 +1,6 @@
+import { defineStore } from 'pinia'
 import type { Chapter, ChapterDraft, Project } from '~/types/domain'
+import { apiFetch } from '~/composables/useApi'
 
 interface WorkspaceState {
   projects: Project[]
@@ -17,7 +19,7 @@ export const useWorkspaceStore = defineStore('workspace', {
     loading: false
   }),
   actions: {
-    async fetchProjects() {
+    async fetchProjects(): Promise<void> {
       this.loading = true
       try {
         const res = await apiFetch<{ projects: Project[] }>('/api/projects')
@@ -26,7 +28,7 @@ export const useWorkspaceStore = defineStore('workspace', {
         this.loading = false
       }
     },
-    async createProject(payload: { title: string; genre: string; style: string; targetWords: number }) {
+    async createProject(payload: { title: string; genre: string; style: string; targetWords: number }): Promise<Project> {
       const res = await apiFetch<{ project: Project }>('/api/projects', {
         method: 'POST',
         body: payload
@@ -34,13 +36,13 @@ export const useWorkspaceStore = defineStore('workspace', {
       this.projects.unshift(res.project)
       return res.project
     },
-    async fetchProject(id: string) {
+    async fetchProject(id: string): Promise<{ project: Project; chapters: Chapter[] }> {
       const res = await apiFetch<{ project: Project; chapters: Chapter[] }>(`/api/projects/${id}`)
       this.currentProject = res.project
       this.chapters = res.chapters
       return res
     },
-    async createChapter(projectId: string, payload: { title: string }) {
+    async createChapter(projectId: string, payload: { title: string }): Promise<Chapter> {
       const res = await apiFetch<{ chapter: Chapter }>(`/api/projects/${projectId}/chapters`, {
         method: 'POST',
         body: payload
@@ -48,7 +50,7 @@ export const useWorkspaceStore = defineStore('workspace', {
       this.chapters.push(res.chapter)
       return res.chapter
     },
-    async fetchDrafts(chapterId: string) {
+    async fetchDrafts(chapterId: string): Promise<ChapterDraft[]> {
       const res = await apiFetch<{ drafts: ChapterDraft[] }>(`/api/chapters/${chapterId}/drafts`)
       this.drafts = res.drafts
       return res.drafts

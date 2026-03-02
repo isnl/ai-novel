@@ -1,4 +1,4 @@
-import { createError, readBody } from 'h3'
+import { createError, defineEventHandler, readBody } from 'h3'
 import { getDb } from '~/server/utils/db'
 import { createSession, getUserById } from '~/server/utils/session'
 import { verifyPassword } from '~/server/utils/crypto'

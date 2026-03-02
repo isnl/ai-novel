@@ -1,5 +1,5 @@
-import { getRouterParam } from 'h3'
-import { buildAgentSystemPrompt, buildAgentUserPrompt, failedMetadata, saveAgentRun } from '~/server/utils/agents'
+import { defineEventHandler, getRouterParam, readBody } from 'h3'
+import { buildAgentSystemPrompt, buildAgentUserPrompt, failedMetadata, resolvePromptTemplate, saveAgentRun } from '~/server/utils/agents'
 import { getDb } from '~/server/utils/db'
 import { runModelWithAgentBinding } from '~/server/utils/model-gateway'
 import { requireProjectForUser } from '~/server/utils/project'
@@ -10,15 +10,37 @@ export default defineEventHandler(async (event) => {
   const projectId = getRouterParam(event, 'id') || ''
   const project = requireProjectForUser(projectId, user.id)
 
-  const input = { type: 'outline' }
+  const body = await readBody<{ userInput?: string; promptTemplateId?: string }>(event).catch(() => ({}))
+  const userInput = (body.userInput || '').trim()
+  const promptTemplateId = (body.promptTemplateId || '').trim()
+
+  const input = { type: 'outline', userInput, promptTemplateId }
+
+  let systemPrompt: string
+  let userPrompt: string
+
+  if (promptTemplateId) {
+    const resolved = resolvePromptTemplate(promptTemplateId, {
+      projectTitle: String(project.title),
+      userInput,
+      worldText: String(project.world_text || ''),
+      outlineText: String(project.outline_text || '')
+    })
+    systemPrompt = resolved.systemPrompt
+    userPrompt = resolved.userPrompt
+  } else {
+    systemPrompt = buildAgentSystemPrompt('outline')
+    userPrompt = buildAgentUserPrompt('outline', {
+      projectTitle: project.title,
+      worldText: project.world_text,
+      userInput
+    })
+  }
 
   try {
     const modelResult = await runModelWithAgentBinding(event, 'generate', {
-      systemPrompt: buildAgentSystemPrompt('outline'),
-      userPrompt: buildAgentUserPrompt('outline', {
-        projectTitle: project.title,
-        worldText: project.world_text
-      })
+      systemPrompt,
+      userPrompt
     })
 
     const content = modelResult.content.trim()

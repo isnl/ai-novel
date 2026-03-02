@@ -207,3 +207,44 @@ export function failedMetadata() {
     costEstimate: 0
   }
 }
+
+export function resolvePromptTemplate(
+  templateId: string,
+  variables: Record<string, string>
+): { systemPrompt: string; userPrompt: string } {
+  const db = getDb()
+  const row = db
+    .prepare('SELECT system_prompt, user_prompt_template FROM prompt_templates WHERE id = ? AND is_active = 1')
+    .get(templateId) as { system_prompt: string; user_prompt_template: string } | undefined
+
+  if (!row) {
+    throw new Error(`提示词模板不存在或已禁用: ${templateId}`)
+  }
+
+  let userPrompt = row.user_prompt_template
+  for (const [key, value] of Object.entries(variables)) {
+    userPrompt = userPrompt.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value || '')
+  }
+
+  return {
+    systemPrompt: row.system_prompt,
+    userPrompt
+  }
+}
+
+export function buildPolishInputPrompt(rawInput: string): { systemPrompt: string; userPrompt: string } {
+  const db = getDb()
+  const row = db
+    .prepare("SELECT system_prompt, user_prompt_template FROM prompt_templates WHERE id = 'tpl_polish_input' AND is_active = 1")
+    .get() as { system_prompt: string; user_prompt_template: string } | undefined
+
+  if (row) {
+    const userPrompt = row.user_prompt_template.replace(/\{\{userInput\}\}/g, rawInput)
+    return { systemPrompt: row.system_prompt, userPrompt }
+  }
+
+  return {
+    systemPrompt: '你是一位文字润色助手。将用户提供的粗略描述润色为清晰、具体、结构化的需求描述。保持原意不变，不要添加用户没有表达的内容。只输出润色后的文本，不要附加解释。',
+    userPrompt: `请润色以下描述：\n\n${rawInput}`
+  }
+}

@@ -1,9 +1,9 @@
-import { getRouterParam } from 'h3'
+import { defineEventHandler, getRouterParam } from 'h3'
+import { requireAdmin } from '~/server/utils/admin'
 import { runModelWithProfileId } from '~/server/utils/model-gateway'
-import { requireUser } from '~/server/utils/session'
 
 export default defineEventHandler(async (event) => {
-  requireUser(event)
+  requireAdmin(event)
   const id = getRouterParam(event, 'id') || ''
 
   const result = await runModelWithProfileId(event, id, {

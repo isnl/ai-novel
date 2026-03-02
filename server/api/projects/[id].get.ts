@@ -1,4 +1,4 @@
-import { getRouterParam } from 'h3'
+import { defineEventHandler, getRouterParam } from 'h3'
 import { getDb } from '~/server/utils/db'
 import { requireProjectForUser, toChapterResponse, toProjectResponse } from '~/server/utils/project'
 import { requireUser } from '~/server/utils/session'

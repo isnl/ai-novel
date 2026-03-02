@@ -1,3 +1,6 @@
+import { defineNuxtRouteMiddleware, navigateTo } from '#imports'
+import { useAuthStore } from '~/stores/auth.store'
+
 export default defineNuxtRouteMiddleware(async (to) => {
   if (!to.path.startsWith('/workspace')) {
     return

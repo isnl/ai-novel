@@ -1,10 +1,11 @@
-import { createError, getRouterParam, readBody } from 'h3'
+import { createError, defineEventHandler, getRouterParam, readBody } from 'h3'
+import { useRuntimeConfig } from '#imports'
+import { requireAdmin } from '~/server/utils/admin'
 import { encryptApiKey } from '~/server/utils/crypto'
 import { getDb } from '~/server/utils/db'
-import { requireUser } from '~/server/utils/session'
 
 export default defineEventHandler(async (event) => {
-  requireUser(event)
+  requireAdmin(event)
   const id = getRouterParam(event, 'id') || ''
   const body = await readBody<{
     modelName?: string

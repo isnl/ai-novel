@@ -82,3 +82,53 @@ export interface AgentRun {
     costEstimate: number
   }
 }
+
+export interface PromptCategory {
+  id: string
+  name: string
+  description?: string | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PromptTemplate {
+  id: string
+  categoryId: string
+  name: string
+  description?: string | null
+  systemPrompt: string
+  userPromptTemplate: string
+  variablesJson: string
+  isActive: number
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+  categoryName?: string
+}
+
+export type ChatContextType = 'world' | 'outline' | 'characters' | 'general'
+
+export interface ChatSession {
+  id: string
+  projectId: string
+  title: string
+  contextType: ChatContextType
+  systemContext?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChatMessage {
+  id: string
+  sessionId: string
+  role: 'user' | 'assistant'
+  content: string
+  metadata?: {
+    tokensIn?: number
+    tokensOut?: number
+    model?: string
+    latencyMs?: number
+  } | null
+  createdAt: string
+}

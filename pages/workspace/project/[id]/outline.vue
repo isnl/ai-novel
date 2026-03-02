@@ -1,26 +1,81 @@
 <script setup lang="ts">
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { definePageMeta, useRoute } from '#imports'
+import { apiFetch } from '~/composables/useApi'
+import { useAiChat } from '~/composables/useAiChat'
+import WorkspaceTabs from '~/components/WorkspaceTabs.vue'
+
 definePageMeta({ middleware: 'auth' })
 
 const route = useRoute()
 const projectId = String(route.params.id)
+const { openDrawer, registerEditor, unregisterEditor, updateEditorText } = useAiChat()
 
+// --- State ---
 const loading = ref(false)
 const saving = ref(false)
+const polishing = ref(false)
 const project = ref<Record<string, unknown> | null>(null)
 const outlineText = ref('')
 
-async function load() {
+// AI panel
+const promptTemplates = ref<Array<{ id: string; name: string; description: string }>>([])
+const selectedTemplateId = ref('')
+const userInput = ref('')
+
+const wordCount = computed((): number => outlineText.value.length)
+
+// --- Editor 注册 ---
+onMounted(() => {
+  registerEditor(
+    () => outlineText.value,
+    (text: string) => {
+      outlineText.value = text
+      saveOutline()
+    }
+  )
+  loadTemplates()
+})
+
+onUnmounted(() => {
+  unregisterEditor()
+})
+
+watch(outlineText, (val) => {
+  updateEditorText(val)
+})
+
+// --- Data loading ---
+async function load(): Promise<void> {
   const res = await apiFetch<{ project: Record<string, unknown> }>(`/api/projects/${projectId}`)
   project.value = res.project
   outlineText.value = String(res.project.outlineText || '')
 }
 
+async function loadTemplates(): Promise<void> {
+  const res = await apiFetch<{ templates: Array<{ id: string; name: string; description: string }> }>(
+    '/api/prompt-templates?category_id=cat_outline'
+  )
+  promptTemplates.value = res.templates
+  if (res.templates.length > 0 && !selectedTemplateId.value) {
+    selectedTemplateId.value = res.templates[0].id
+  }
+}
+
 await load()
 
-async function generateOutline() {
+// --- Actions ---
+async function generateOutline(): Promise<void> {
   loading.value = true
   try {
-    const res = await apiFetch<{ content: string }>(`/api/projects/${projectId}/outline/generate`, { method: 'POST' })
+    const body: Record<string, string> = {}
+    if (userInput.value.trim()) body.userInput = userInput.value.trim()
+    if (selectedTemplateId.value) body.promptTemplateId = selectedTemplateId.value
+
+    const res = await apiFetch<{ content: string }>(`/api/projects/${projectId}/outline/generate`, {
+      method: 'POST',
+      body
+    })
     outlineText.value = res.content
     await load()
   } finally {
@@ -28,43 +83,165 @@ async function generateOutline() {
   }
 }
 
-async function saveOutline() {
+async function polishInput(): Promise<void> {
+  if (!userInput.value.trim()) return
+  polishing.value = true
+  try {
+    const res = await apiFetch<{ content: string }>(`/api/projects/${projectId}/polish-input`, {
+      method: 'POST',
+      body: { rawInput: userInput.value.trim() }
+    })
+    userInput.value = res.content
+  } finally {
+    polishing.value = false
+  }
+}
+
+async function saveOutline(): Promise<void> {
   saving.value = true
   try {
-    await apiFetch(`/api/projects/${projectId}`, {
-      method: 'PUT',
-      body: { outlineText: outlineText.value }
-    })
+    await apiFetch(`/api/projects/${projectId}`, { method: 'PUT', body: { outlineText: outlineText.value } })
     await load()
   } finally {
     saving.value = false
   }
+}
+
+function openAiChat(): void {
+  openDrawer(projectId, 'outline')
 }
 </script>
 
 <template>
   <div class="page-wrap" v-if="project">
     <WorkspaceTabs :project-id="projectId" />
-    <section class="card">
-      <h1>主线大纲</h1>
-      <p class="muted">卷纲 + 关键章纲骨架，支持手动和 AI 并排协作。</p>
-      <div class="actions">
-        <button class="btn btn-primary" :disabled="loading" @click="generateOutline">{{ loading ? '生成中...' : 'AI 生成' }}</button>
-        <button class="btn btn-secondary" :disabled="saving" @click="saveOutline">{{ saving ? '保存中...' : '保存手改' }}</button>
+
+    <div class="editor-header">
+      <div>
+        <h1 class="section-title"><span class="i-carbon-list-boxes" /> 主线大纲</h1>
+        <p class="section-desc">卷纲 + 关键章纲骨架，支持手动和 AI 并排协作。</p>
       </div>
-      <textarea v-model="outlineText" class="textarea editor"></textarea>
-    </section>
+      <div class="actions">
+        <button class="btn btn-ghost" @click="openAiChat">
+          <span class="i-carbon-chat-bot" />
+          AI 对话
+        </button>
+        <button class="btn btn-secondary" :disabled="saving" @click="saveOutline">
+          <span class="i-carbon-save" />
+          {{ saving ? '保存中...' : '保存' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="dual-panel">
+      <!-- Left: Editor -->
+      <section class="card editor-panel">
+        <textarea v-model="outlineText" class="textarea editor" placeholder="在此编辑大纲，或使用右侧 AI 面板生成..." />
+        <div class="word-count">{{ wordCount }} 字</div>
+      </section>
+
+      <!-- Right: AI Generation Panel -->
+      <aside class="card ai-panel">
+        <h2 class="panel-title"><span class="i-carbon-machine-learning-model" /> AI 生成</h2>
+
+        <label class="form-label">
+          <span>提示词模板</span>
+          <select v-model="selectedTemplateId" class="select">
+            <option value="">默认模板</option>
+            <option v-for="tpl in promptTemplates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
+          </select>
+        </label>
+
+        <label class="form-label">
+          <span>创作需求</span>
+          <textarea
+            v-model="userInput"
+            class="textarea ai-input"
+            placeholder="描述你想生成的大纲结构，如：三幕式结构，第一卷以悬疑开头引出主线..."
+            rows="5"
+          />
+        </label>
+
+        <div class="ai-actions">
+          <button
+            class="btn btn-ghost btn-sm"
+            :disabled="polishing || !userInput.trim()"
+            @click="polishInput"
+          >
+            <span class="i-carbon-text-annotation-toggle" />
+            {{ polishing ? '润色中...' : 'AI 润色输入' }}
+          </button>
+        </div>
+
+        <button
+          class="btn btn-primary btn-generate"
+          :disabled="loading"
+          @click="generateOutline"
+        >
+          <span class="i-carbon-machine-learning-model" />
+          {{ loading ? '生成中...' : '开始生成' }}
+        </button>
+
+        <p class="ai-hint muted">生成结果将自动填入左侧编辑器，可手动修改后保存。</p>
+      </aside>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.actions {
-  margin: var(--space-3) 0;
+.editor-header {
   display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-4);
+}
+.editor-header h1 { display: flex; align-items: center; gap: var(--space-2); }
+.actions { display: flex; gap: var(--space-2); }
+
+.dual-panel {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.editor-panel { display: flex; flex-direction: column; }
+.editor {
+  min-height: 500px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  flex: 1;
+}
+
+.ai-panel {
+  position: sticky;
+  top: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.panel-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  display: flex;
+  align-items: center;
   gap: var(--space-2);
 }
 
-.editor {
-  min-height: 360px;
+.ai-input { resize: vertical; }
+.ai-actions { display: flex; justify-content: flex-end; }
+.btn-sm { height: 32px; font-size: var(--text-xs); }
+
+.btn-generate { width: 100%; }
+
+.ai-hint {
+  font-size: var(--text-xs);
+  margin: 0;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .dual-panel { grid-template-columns: 1fr; }
+  .ai-panel { position: static; }
+  .editor { min-height: 300px; }
 }
 </style>

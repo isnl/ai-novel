@@ -1,3 +1,4 @@
+import { defineEventHandler } from 'h3'
 import { getDb } from '~/server/utils/db'
 
 export default defineEventHandler(() => {

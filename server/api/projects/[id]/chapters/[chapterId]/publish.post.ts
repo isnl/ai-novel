@@ -1,4 +1,4 @@
-import { createError, getRouterParam } from 'h3'
+import { createError, defineEventHandler, getRouterParam } from 'h3'
 import { randomId } from '~/server/utils/crypto'
 import { getDb } from '~/server/utils/db'
 import { requireChapterForProject, requireProjectForUser } from '~/server/utils/project'

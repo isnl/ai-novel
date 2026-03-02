@@ -1,4 +1,4 @@
-import { getRouterParam } from 'h3'
+import { defineEventHandler, getRouterParam } from 'h3'
 import { buildAgentSystemPrompt, buildAgentUserPrompt, failedMetadata, saveAgentRun } from '~/server/utils/agents'
 import { randomId } from '~/server/utils/crypto'
 import { getDb } from '~/server/utils/db'

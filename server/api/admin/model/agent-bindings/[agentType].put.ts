@@ -1,9 +1,9 @@
-import { getRouterParam, readBody } from 'h3'
+import { defineEventHandler, getRouterParam, readBody } from 'h3'
+import { requireAdmin } from '~/server/utils/admin'
 import { getDb } from '~/server/utils/db'
-import { requireUser } from '~/server/utils/session'
 
 export default defineEventHandler(async (event) => {
-  requireUser(event)
+  requireAdmin(event)
   const agentType = getRouterParam(event, 'agentType') || ''
   const body = await readBody<{ primaryProfileId?: string; fallbackProfileId?: string; strategyJson?: string }>(event)
 

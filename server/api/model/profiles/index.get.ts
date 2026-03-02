@@ -1,3 +1,5 @@
+import { defineEventHandler } from 'h3'
+import { useRuntimeConfig } from '#imports'
 import { decryptApiKey, maskApiKey } from '~/server/utils/crypto'
 import { getDb } from '~/server/utils/db'
 import { requireUser } from '~/server/utils/session'

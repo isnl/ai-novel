@@ -1,5 +1,6 @@
 import type { H3Event } from 'h3'
 import { createError } from 'h3'
+import { useRuntimeConfig } from '#imports'
 import { decryptApiKey } from './crypto'
 import { getDb } from './db'
 
