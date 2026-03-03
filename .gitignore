@@ -9,10 +9,6 @@ node_modules/
 .npm-cache/
 .cache/
 
-# Runtime data
-data/*.db
-data/*.db-*
-
 # Environment files
 .env
 .env.*
