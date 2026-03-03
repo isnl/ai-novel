@@ -4,6 +4,7 @@ import { definePageMeta, useRoute } from '#imports'
 import { apiFetch, apiStreamFetch } from '~/composables/useApi'
 import { useAiChat } from '~/composables/useAiChat'
 import WorkspaceTabs from '~/components/WorkspaceTabs.vue'
+import MarkdownViewer from '~/components/MarkdownViewer.vue'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -24,6 +25,9 @@ const selectedTemplateId = ref('')
 const userInput = ref('')
 
 const wordCount = computed((): number => worldText.value.length)
+
+// Markdown 预览模式
+const previewMode = ref(false)
 
 // --- Editor 注册 ---
 onMounted(() => {
@@ -121,6 +125,10 @@ function openAiChat(): void {
         <p class="section-desc">硬规则、软规则、势力关系和核心矛盾。</p>
       </div>
       <div class="actions">
+        <button class="btn btn-ghost" @click="previewMode = !previewMode">
+          <span :class="previewMode ? 'i-carbon-edit' : 'i-carbon-view'" />
+          {{ previewMode ? '编辑' : '预览' }}
+        </button>
         <button class="btn btn-ghost" @click="openAiChat">
           <span class="i-carbon-chat-bot" />
           AI 对话
@@ -133,9 +141,17 @@ function openAiChat(): void {
     </div>
 
     <div class="dual-panel">
-      <!-- Left: Editor -->
+      <!-- Left: Editor / Preview -->
       <section class="card editor-panel">
-        <textarea v-model="worldText" class="textarea editor" placeholder="在此编辑世界观设定，或使用右侧 AI 面板生成..." />
+        <textarea
+          v-if="!previewMode"
+          v-model="worldText"
+          class="textarea editor"
+          placeholder="在此编辑世界观设定，或使用右侧 AI 面板生成..."
+        />
+        <div v-else class="preview-area">
+          <MarkdownViewer :content="worldText" />
+        </div>
         <div class="word-count">{{ wordCount }} 字</div>
       </section>
 
@@ -208,6 +224,13 @@ function openAiChat(): void {
 .editor {
   min-height: 500px;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  flex: 1;
+}
+
+.preview-area {
+  min-height: 500px;
+  padding: var(--space-4);
+  overflow-y: auto;
   flex: 1;
 }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { definePageMeta, useRoute } from '#imports'
-import { apiFetch, apiStreamFetch } from '~/composables/useApi'
+import { apiFetch } from '~/composables/useApi'
 import WorkspaceTabs from '~/components/WorkspaceTabs.vue'
 
 definePageMeta({ middleware: 'auth' })
@@ -18,29 +18,38 @@ interface CharacterCard {
   notes: string
 }
 
+type CharacterField = keyof CharacterCard
+
+const FIELD_META: Array<{ key: CharacterField; label: string; placeholder: string; multiline: boolean }> = [
+  { key: 'name', label: '姓名', placeholder: '角色名称', multiline: false },
+  { key: 'role', label: '角色定位', placeholder: '如：主角、反派、导师、配角', multiline: false },
+  { key: 'motivation', label: '核心动机', placeholder: '角色的核心驱动力', multiline: false },
+  { key: 'arc', label: '成长弧线', placeholder: '角色在故事中的成长变化', multiline: true },
+  { key: 'traits', label: '性格特质', placeholder: '如：勇敢、固执、善良', multiline: false },
+  { key: 'notes', label: '备注', placeholder: '其他补充信息', multiline: true }
+]
+
 // --- State ---
-const loading = ref(false)
 const saving = ref(false)
-const polishing = ref(false)
 const project = ref<Record<string, unknown> | null>(null)
 const characters = ref<CharacterCard[]>([])
 
-// Edit modal
-const showEditForm = ref(false)
-const editingIndex = ref(-1)
+// 当前编辑的角色
+const editing = ref(false)
+const editingIndex = ref(-1) // -1 表示新建
 const charForm = reactive<CharacterCard>({
   name: '', role: '', motivation: '', arc: '', traits: '', notes: ''
 })
 
-// AI panel
-const promptTemplates = ref<Array<{ id: string; name: string; description: string }>>([])
-const selectedTemplateId = ref('')
-const userInput = ref('')
-
-// AI 原始流式输出（用于展示生成进度）
-const streamingRaw = ref('')
+// AI 字段生成状态
+const generatingField = ref<CharacterField | null>(null)
+const userHint = ref('')
 
 const charCount = computed((): number => characters.value.length)
+
+function emptyCharacter(): CharacterCard {
+  return { name: '', role: '', motivation: '', arc: '', traits: '', notes: '' }
+}
 
 function parseCharacters(json: string): CharacterCard[] {
   try {
@@ -70,41 +79,22 @@ async function load(): Promise<void> {
   characters.value = parseCharacters(String(res.project.charactersJson || '[]'))
 }
 
-async function loadTemplates(): Promise<void> {
-  const res = await apiFetch<{ templates: Array<{ id: string; name: string; description: string }> }>(
-    '/api/prompt-templates?category_id=cat_characters'
-  )
-  promptTemplates.value = res.templates
-  if (res.templates.length > 0 && !selectedTemplateId.value) {
-    selectedTemplateId.value = res.templates[0].id
-  }
-}
-
 await load()
-onMounted(() => { loadTemplates() })
 
 // --- Character CRUD ---
-function openAddCharacter(): void {
+function startNewCharacter(): void {
   editingIndex.value = -1
-  charForm.name = ''
-  charForm.role = ''
-  charForm.motivation = ''
-  charForm.arc = ''
-  charForm.traits = ''
-  charForm.notes = ''
-  showEditForm.value = true
+  Object.assign(charForm, emptyCharacter())
+  userHint.value = ''
+  editing.value = true
 }
 
-function openEditCharacter(index: number): void {
+function startEditCharacter(index: number): void {
   editingIndex.value = index
   const c = characters.value[index]
-  charForm.name = c.name
-  charForm.role = c.role
-  charForm.motivation = c.motivation
-  charForm.arc = c.arc
-  charForm.traits = c.traits
-  charForm.notes = c.notes
-  showEditForm.value = true
+  Object.assign(charForm, { ...c })
+  userHint.value = ''
+  editing.value = true
 }
 
 function saveCharacterForm(): void {
@@ -114,54 +104,41 @@ function saveCharacterForm(): void {
   } else {
     characters.value.push(entry)
   }
-  showEditForm.value = false
+  editing.value = false
+}
+
+function cancelEdit(): void {
+  editing.value = false
 }
 
 function deleteCharacter(index: number): void {
   characters.value.splice(index, 1)
-}
-
-// --- Actions ---
-async function generateCharacters(): Promise<void> {
-  loading.value = true
-  streamingRaw.value = ''
-  try {
-    const body: Record<string, string> = {}
-    if (userInput.value.trim()) body.userInput = userInput.value.trim()
-    if (selectedTemplateId.value) body.promptTemplateId = selectedTemplateId.value
-
-    const fullText = await apiStreamFetch(
-      `/api/projects/${projectId}/characters/generate`,
-      body,
-      (chunk) => {
-        streamingRaw.value += chunk
-      }
-    )
-    const generated = parseCharacters(fullText)
-    if (generated.length > 0) {
-      characters.value = generated
-    }
-    streamingRaw.value = ''
-    await load()
-  } finally {
-    loading.value = false
+  if (editing.value && editingIndex.value === index) {
+    editing.value = false
+  } else if (editing.value && editingIndex.value > index) {
+    editingIndex.value -= 1
   }
 }
 
-async function polishInput(): Promise<void> {
-  if (!userInput.value.trim()) return
-  polishing.value = true
+// --- AI 单字段生成 ---
+async function generateField(field: CharacterField): Promise<void> {
+  generatingField.value = field
   try {
-    const res = await apiFetch<{ content: string }>(`/api/projects/${projectId}/polish-input`, {
+    const res = await apiFetch<{ content: string }>(`/api/projects/${projectId}/characters/generate-field`, {
       method: 'POST',
-      body: { rawInput: userInput.value.trim() }
+      body: {
+        field,
+        existingCharacter: { ...charForm },
+        userHint: userHint.value.trim() || undefined
+      }
     })
-    userInput.value = res.content
+    charForm[field] = res.content
   } finally {
-    polishing.value = false
+    generatingField.value = null
   }
 }
 
+// --- 保存到服务器 ---
 async function saveCharacters(): Promise<void> {
   saving.value = true
   try {
@@ -183,12 +160,12 @@ async function saveCharacters(): Promise<void> {
     <div class="editor-header">
       <div>
         <h1 class="section-title"><span class="i-carbon-group" /> 角色设定</h1>
-        <p class="section-desc">角色卡、关系网、动机与成长弧。共 {{ charCount }} 个角色。</p>
+        <p class="section-desc">逐个创建和打磨你的角色，每个属性都可以 AI 辅助生成。共 {{ charCount }} 个角色。</p>
       </div>
       <div class="actions">
-        <button class="btn btn-ghost" @click="openAddCharacter">
+        <button class="btn btn-ghost" @click="startNewCharacter" :disabled="editing">
           <span class="i-carbon-add" />
-          手动添加
+          新建角色
         </button>
         <button class="btn btn-secondary" :disabled="saving" @click="saveCharacters">
           <span class="i-carbon-save" />
@@ -197,142 +174,119 @@ async function saveCharacters(): Promise<void> {
       </div>
     </div>
 
-    <div class="dual-panel">
-      <!-- Left: Character cards -->
-      <section class="char-panel">
-        <!-- Edit form -->
-        <div v-if="showEditForm" class="card char-form-card">
-          <h3 class="form-card-title">{{ editingIndex >= 0 ? '编辑角色' : '新增角色' }}</h3>
-          <div class="char-form-grid">
-            <label class="form-label">
-              <span>姓名</span>
-              <input v-model="charForm.name" class="input" placeholder="角色名称" />
-            </label>
-            <label class="form-label">
-              <span>角色定位</span>
-              <input v-model="charForm.role" class="input" placeholder="如：主角、反派、导师" />
-            </label>
-            <label class="form-label char-form-full">
-              <span>动机</span>
-              <input v-model="charForm.motivation" class="input" placeholder="角色的核心驱动力" />
-            </label>
-            <label class="form-label char-form-full">
-              <span>成长弧</span>
-              <textarea v-model="charForm.arc" class="textarea" rows="2" placeholder="角色在故事中的成长变化" />
-            </label>
-            <label class="form-label char-form-full">
-              <span>性格特质</span>
-              <input v-model="charForm.traits" class="input" placeholder="如：勇敢、固执、善良" />
-            </label>
-            <label class="form-label char-form-full">
-              <span>备注</span>
-              <textarea v-model="charForm.notes" class="textarea" rows="2" placeholder="其他补充信息" />
-            </label>
-          </div>
-          <div class="char-form-actions">
-            <button class="btn btn-primary" :disabled="!charForm.name.trim()" @click="saveCharacterForm">
-              <span class="i-carbon-checkmark" />
-              确认
-            </button>
-            <button class="btn btn-secondary" @click="showEditForm = false">取消</button>
-          </div>
-        </div>
-
-        <!-- Character card list -->
-        <div v-if="!characters.length && !showEditForm" class="card empty-state">
+    <div class="main-layout">
+      <!-- 左侧：角色列表 -->
+      <section class="char-list">
+        <div v-if="!characters.length && !editing" class="card empty-state">
           <div class="empty-state-icon i-carbon-user-avatar-filled" />
           <p class="empty-state-title">暂无角色</p>
-          <p class="empty-state-desc">点击「手动添加」或使用右侧 AI 面板生成角色。</p>
+          <p class="empty-state-desc">点击「新建角色」开始创建你的第一个角色。</p>
+          <button class="btn btn-primary" @click="startNewCharacter">
+            <span class="i-carbon-add" />
+            新建角色
+          </button>
         </div>
 
-        <div v-else class="char-grid">
-          <div v-for="(char, index) in characters" :key="index" class="card char-card">
-            <div class="char-card-header">
-              <div class="char-avatar">{{ char.name.charAt(0) }}</div>
-              <div>
-                <h3 class="char-name">{{ char.name }}</h3>
-                <span class="char-role tag tag-default">{{ char.role || '未设定' }}</span>
-              </div>
+        <div
+          v-for="(char, index) in characters"
+          :key="index"
+          class="card char-card"
+          :class="{ 'char-card-active': editing && editingIndex === index }"
+          @click="startEditCharacter(index)"
+        >
+          <div class="char-card-header">
+            <div class="char-avatar">{{ char.name ? char.name.charAt(0) : '?' }}</div>
+            <div class="char-card-info">
+              <h3 class="char-name">{{ char.name || '未命名' }}</h3>
+              <span class="char-role tag tag-default">{{ char.role || '未设定' }}</span>
             </div>
-            <div class="char-details">
-              <div v-if="char.motivation" class="char-field">
-                <span class="char-field-label"><span class="i-carbon-target" /> 动机</span>
-                <p>{{ char.motivation }}</p>
-              </div>
-              <div v-if="char.arc" class="char-field">
-                <span class="char-field-label"><span class="i-carbon-growth" /> 成长弧</span>
-                <p>{{ char.arc }}</p>
-              </div>
-              <div v-if="char.traits" class="char-field">
-                <span class="char-field-label"><span class="i-carbon-user-profile" /> 特质</span>
-                <p>{{ char.traits }}</p>
-              </div>
-              <div v-if="char.notes" class="char-field">
-                <span class="char-field-label"><span class="i-carbon-document" /> 备注</span>
-                <p>{{ char.notes }}</p>
-              </div>
-            </div>
-            <div class="char-card-actions">
-              <button class="btn btn-secondary btn-sm" @click="openEditCharacter(index)">
-                <span class="i-carbon-edit" /> 编辑
-              </button>
-              <button class="btn btn-ghost btn-sm" @click="deleteCharacter(index)">
-                <span class="i-carbon-trash-can" /> 删除
-              </button>
-            </div>
+          </div>
+          <div class="char-summary">
+            <p v-if="char.motivation" class="char-line"><span class="char-line-label">动机</span>{{ char.motivation }}</p>
+            <p v-if="char.traits" class="char-line"><span class="char-line-label">特质</span>{{ char.traits }}</p>
+          </div>
+          <div class="char-card-actions" @click.stop>
+            <button class="btn btn-ghost btn-xs" @click="startEditCharacter(index)">
+              <span class="i-carbon-edit" /> 编辑
+            </button>
+            <button class="btn btn-ghost btn-xs" @click="deleteCharacter(index)">
+              <span class="i-carbon-trash-can" /> 删除
+            </button>
           </div>
         </div>
       </section>
 
-      <!-- Right: AI Generation Panel -->
-      <aside class="card ai-panel">
-        <h2 class="panel-title"><span class="i-carbon-machine-learning-model" /> AI 生成</h2>
+      <!-- 右侧：角色工作台 -->
+      <section v-if="editing" class="card workbench">
+        <div class="workbench-header">
+          <h2 class="workbench-title">
+            {{ editingIndex >= 0 ? '编辑角色' : '新建角色' }}
+          </h2>
+          <div class="workbench-actions">
+            <button
+              class="btn btn-primary"
+              :disabled="!charForm.name.trim()"
+              @click="saveCharacterForm"
+            >
+              <span class="i-carbon-checkmark" />
+              确认
+            </button>
+            <button class="btn btn-ghost" @click="cancelEdit">取消</button>
+          </div>
+        </div>
 
-        <label class="form-label">
-          <span>提示词模板</span>
-          <select v-model="selectedTemplateId" class="select">
-            <option value="">默认模板</option>
-            <option v-for="tpl in promptTemplates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
-          </select>
-        </label>
-
-        <label class="form-label">
-          <span>创作需求</span>
-          <textarea
-            v-model="userInput"
-            class="textarea ai-input"
-            placeholder="描述你想生成的角色，如：需要一个亦正亦邪的反派，有复杂的过去..."
-            rows="5"
+        <!-- 用户补充提示 -->
+        <div class="hint-bar">
+          <input
+            v-model="userHint"
+            class="input hint-input"
+            placeholder="可选：给 AI 的补充说明，如「武侠风格」「性格反差萌」..."
           />
-        </label>
+        </div>
 
-        <div class="ai-actions">
-          <button
-            class="btn btn-ghost btn-sm"
-            :disabled="polishing || !userInput.trim()"
-            @click="polishInput"
+        <!-- 各字段 -->
+        <div class="fields-list">
+          <div
+            v-for="meta in FIELD_META"
+            :key="meta.key"
+            class="field-row"
           >
-            <span class="i-carbon-text-annotation-toggle" />
-            {{ polishing ? '润色中...' : 'AI 润色输入' }}
-          </button>
+            <div class="field-label-row">
+              <label class="field-label">{{ meta.label }}</label>
+              <button
+                class="btn btn-ghost btn-xs ai-btn"
+                :disabled="generatingField !== null"
+                @click="generateField(meta.key)"
+              >
+                <span v-if="generatingField === meta.key" class="i-carbon-circle-dash spin" />
+                <span v-else class="i-carbon-machine-learning-model" />
+                {{ generatingField === meta.key ? '生成中...' : 'AI 生成' }}
+              </button>
+            </div>
+            <textarea
+              v-if="meta.multiline"
+              v-model="charForm[meta.key]"
+              class="textarea field-input"
+              :placeholder="meta.placeholder"
+              rows="3"
+            />
+            <input
+              v-else
+              v-model="charForm[meta.key]"
+              class="input field-input"
+              :placeholder="meta.placeholder"
+            />
+          </div>
         </div>
+      </section>
 
-        <button
-          class="btn btn-primary btn-generate"
-          :disabled="loading"
-          @click="generateCharacters"
-        >
-          <span class="i-carbon-machine-learning-model" />
-          {{ loading ? '生成中...' : '开始生成' }}
-        </button>
-
-        <p class="ai-hint muted">AI 生成的角色将替换当前列表，请先保存再生成。</p>
-
-        <div v-if="streamingRaw" class="streaming-preview">
-          <h3 class="streaming-title">生成中...</h3>
-          <pre class="streaming-content">{{ streamingRaw }}</pre>
+      <!-- 未编辑时的引导 -->
+      <section v-else class="card workbench workbench-empty">
+        <div class="empty-state">
+          <span class="i-carbon-user-avatar-filled empty-icon" />
+          <p>选择左侧角色进行编辑，或点击「新建角色」</p>
         </div>
-      </aside>
+      </section>
     </div>
   </div>
 </template>
@@ -347,106 +301,158 @@ async function saveCharacters(): Promise<void> {
 .editor-header h1 { display: flex; align-items: center; gap: var(--space-2); }
 .actions { display: flex; gap: var(--space-2); }
 
-.dual-panel {
+.main-layout {
   display: grid;
-  grid-template-columns: 1fr 340px;
+  grid-template-columns: 280px 1fr;
   gap: var(--space-4);
   align-items: start;
 }
 
-/* Character cards */
-.char-panel { min-width: 0; }
-.char-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-3); }
+/* --- 角色列表 --- */
+.char-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
 
-.char-card { transition: border-color var(--dur-fast) var(--ease-standard); }
+.char-card {
+  cursor: pointer;
+  padding: var(--space-4);
+  transition: border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+}
 .char-card:hover { border-color: var(--primary); }
+.char-card-active { border-color: var(--primary); box-shadow: var(--shadow-focus); }
 
 .char-card-header {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-2);
 }
+.char-card-info { min-width: 0; }
 
 .char-avatar {
-  width: 42px;
-  height: 42px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
   color: var(--text-inverse);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
   font-weight: 700;
   flex-shrink: 0;
 }
 
-.char-name { margin: 0; font-size: var(--text-md); font-weight: 600; }
-.char-role { margin-top: var(--space-1); display: inline-block; }
+.char-name { margin: 0; font-size: var(--text-sm); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.char-role { margin-top: 2px; display: inline-block; }
 
-.char-details { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-3); }
-.char-field-label {
+.char-summary { margin-bottom: var(--space-2); }
+.char-line {
+  margin: 0;
   font-size: var(--text-xs);
-  font-weight: 600;
   color: var(--text-3);
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  margin-bottom: var(--space-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.6;
 }
-.char-field p { margin: 0; font-size: var(--text-sm); color: var(--text-2); line-height: 1.5; }
+.char-line-label {
+  font-weight: 600;
+  color: var(--text-2);
+  margin-right: var(--space-1);
+}
 
 .char-card-actions {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--space-1);
   border-top: 1px solid var(--divider);
-  padding-top: var(--space-3);
+  padding-top: var(--space-2);
 }
 
-/* Character form */
-.char-form-card { margin-bottom: var(--space-4); border-color: var(--primary); }
-.form-card-title { margin: 0 0 var(--space-4); font-size: var(--text-lg); font-weight: 600; }
-.char-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
-.char-form-full { grid-column: 1 / -1; }
-.char-form-actions { margin-top: var(--space-4); display: flex; gap: var(--space-3); }
-
-/* AI panel */
-.ai-panel {
+/* --- 工作台 --- */
+.workbench {
   position: sticky;
   top: 80px;
+}
+
+.workbench-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-4);
+}
+.workbench-title { margin: 0; font-size: var(--text-lg); font-weight: 600; }
+.workbench-actions { display: flex; gap: var(--space-2); }
+
+.hint-bar { margin-bottom: var(--space-4); }
+.hint-input { height: 36px; font-size: var(--text-sm); }
+
+.fields-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
-.panel-title {
-  margin: 0;
-  font-size: var(--text-lg);
+
+.field-row { }
+
+.field-label-row {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.field-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-2);
 }
 
-.ai-input { resize: vertical; }
-.ai-actions { display: flex; justify-content: flex-end; }
-.btn-sm { height: 32px; font-size: var(--text-xs); }
+.ai-btn {
+  gap: var(--space-1);
+}
 
-.btn-generate { width: 100%; }
+.field-input { font-size: var(--text-sm); }
 
-.ai-hint {
-  font-size: var(--text-xs);
+.workbench-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+}
+
+.empty-icon {
+  font-size: 48px;
+  opacity: 0.3;
+}
+
+.workbench-empty .empty-state {
+  padding: 0;
+}
+.workbench-empty .empty-state p {
   margin: 0;
-  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.btn-xs {
+  height: 26px;
+  padding: 0 var(--space-2);
+  font-size: 11px;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 @media (max-width: 900px) {
-  .dual-panel { grid-template-columns: 1fr; }
-  .ai-panel { position: static; }
-  .char-grid { grid-template-columns: 1fr; }
-  .char-form-grid { grid-template-columns: 1fr; }
+  .main-layout { grid-template-columns: 1fr; }
+  .workbench { position: static; }
 }
-
-.streaming-preview { margin-top: var(--space-3); }
-.streaming-title { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--text-3); }
-.streaming-content { margin: 0; padding: var(--space-3); background: var(--surface-2); border: 1px solid var(--divider); border-radius: var(--radius-sm); font-size: var(--text-xs); font-family: var(--font-mono); white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
 </style>

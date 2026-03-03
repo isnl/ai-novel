@@ -338,7 +338,7 @@ const contextLabel = computed((): string => {
 .drawer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 998;
+  z-index: 1200;
   background: var(--overlay);
 }
 
@@ -348,7 +348,7 @@ const contextLabel = computed((): string => {
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: 999;
+  z-index: 1201;
   width: min(420px, 100vw - 48px);
   background: var(--surface);
   display: flex;

@@ -1,9 +1,23 @@
 import { $fetch } from 'ofetch'
+import { useRequestHeaders } from '#imports'
 
 export async function apiFetch<T>(url: string, options?: Parameters<typeof $fetch<T>>[1]): Promise<T> {
+  // SSR 阶段需要将浏览器 cookie 转发到内部 API
+  const headers: Record<string, string> = {}
+  if (import.meta.server) {
+    const reqHeaders = useRequestHeaders(['cookie'])
+    if (reqHeaders.cookie) {
+      headers.cookie = reqHeaders.cookie
+    }
+  }
+
   return await $fetch<T>(url, {
     ...options,
-    credentials: 'include'
+    credentials: 'include',
+    headers: {
+      ...headers,
+      ...(options?.headers as Record<string, string>)
+    }
   })
 }
 
